@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeadsetConnector — управление</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --card: #151b2e;
+    --card-hi: #1d2540;
+    --line: rgba(255,255,255,.08);
+    --text: #eaeef9;
+    --muted: #8b95ad;
+    --accent: #6c8cff;
+    --accent-2: #9db2ff;
+    --good: #7de2a8;
+    --bad: #ff7b7b;
+    --warn: #ffc46b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  a { color: var(--accent-2); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 26px 18px 60px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 14px; background: rgba(108,140,255,.18);
+    display: grid; place-items: center; font-size: 22px;
+  }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.4px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 18px; margin-bottom: 14px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  input {
+    background: #0e1324; border: 1px solid var(--line); color: var(--text);
+    border-radius: 12px; padding: 11px 13px; font: inherit; outline: none; width: 100%;
+  }
+  input:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 12px;
+    padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  button.ghost {
+    background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500;
+  }
+  button.danger { background: rgba(255,123,123,.16); color: var(--bad); border: 1px solid rgba(255,123,123,.3); }
+  button.mini { padding: 6px 10px; font-size: 12px; border-radius: 9px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    border-radius: 11px; padding: 9px 14px; font-weight: 500;
+  }
+  .tab.on { background: rgba(108,140,255,.14); border-color: rgba(108,140,255,.35); color: var(--accent-2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--card-hi); border-radius: 14px; padding: 13px 14px; }
+  .stat .n { font-size: 24px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; }
+  td.actions { text-align: right; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .pill.ok { background: rgba(125,226,168,.14); color: var(--good); }
+  .pill.bad { background: rgba(255,123,123,.14); color: var(--bad); }
+  .pill.pub { background: rgba(108,140,255,.16); color: var(--accent-2); }
+  .pill.priv { background: rgba(255,196,107,.14); color: var(--warn); }
+  .pill.hset { background: rgba(125,226,168,.12); color: #b8f0cf; }
+  .muted { color: var(--muted); }
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: var(--card-hi); border: 1px solid var(--line); color: var(--text);
+    padding: 11px 16px; border-radius: 12px; opacity: 0; pointer-events: none;
+    transition: opacity .2s; max-width: 90vw; z-index: 20;
+  }
+  .toast.on { opacity: 1; }
+  .empty { color: var(--muted); text-align: center; padding: 20px 0; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  #app { display: none; }
+  @media (max-width: 640px) {
+    th:nth-child(3), td:nth-child(3) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="logo">💬</div>
+    <div>
+      <h1>HeadsetConnector</h1>
+      <div class="sub">Панель управления</div>
+    </div>
+  </div>
+
+  <div id="login" class="card" style="max-width:420px;margin:60px auto">
+    <h2 style="margin:0 0 4px;font-size:18px">Вход в панель</h2>
+    <div class="hint" style="margin-bottom:14px">Пароль администратора задаётся на сервере (ADMIN_PASSWORD) или генерируется при первом запуске.</div>
+    <input id="password" type="password" placeholder="Пароль администратора" autocomplete="current-password">
+    <div style="height:10px"></div>
+    <button id="loginBtn" style="width:100%">Войти</button>
+  </div>
+
+  <div id="app">
+    <div class="row" style="margin-bottom:14px">
+      <div class="tabs grow">
+        <button class="tab on" data-tab="overview">Обзор</button>
+        <button class="tab" data-tab="users">Пользователи</button>
+        <button class="tab" data-tab="rooms">Комнаты</button>
+        <button class="tab" data-tab="media">Медиа</button>
+      </div>
+      <button class="ghost mini" id="logout">Выйти</button>
+    </div>
+
+    <section id="tab-overview">
+      <div class="card">
+        <div class="grid" id="stats"></div>
+        <div class="hint" id="diskbar" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <b class="grow">Последние регистрации</b>
+          <span class="muted" id="serverInfo"></span>
+        </div>
+        <div id="recent"></div>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <b class="grow">Последние сообщения</b>
+        </div>
+        <div id="recentMsgs"></div>
+      </div>
+    </section>
+
+    <section id="tab-users" style="display:none">
+      <div class="card">
+        <div class="row" style="margin-bottom:10px">
+          <input id="userQuery" class="grow" placeholder="Поиск по юзернейму, имени или почте">
+          <button class="ghost" id="searchBtn">Найти</button>
+          <button class="ghost" id="reloadUsers">Обновить</button>
+        </div>
+        <div id="users"></div>
+      </div>
+    </section>
+
+    <section id="tab-rooms" style="display:none">
+      <div class="card">
+        <div class="row" style="margin-bottom:10px">
+          <b class="grow">Все комнаты</b>
+          <button class="ghost mini" id="reloadRooms">Обновить</button>
+        </div>
+        <div id="rooms"></div>
+      </div>
+    </section>
+
+    <section id="tab-media" style="display:none">
+      <div class="card">
+        <div class="row" style="margin-bottom:10px">
+          <b class="grow">Медиа на сервере</b>
+          <span class="muted" id="mediaInfo"></span>
+          <button class="ghost mini" id="reloadMedia">Обновить</button>
+          <button class="mini danger" id="cleanupBtn">Очистить старые</button>
+        </div>
+        <div id="media"></div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id)
+let token = localStorage.getItem('hc_admin') || ''
+
+function toast(text) {
+  const el = $('toast')
+  el.textContent = text
+  el.classList.add('on')
+  clearTimeout(el._t)
+  el._t = setTimeout(() => el.classList.remove('on'), 3500)
+}
+
+async function api(path, options = {}) {
+  const headers = { 'X-Admin-Token': token }
+  if (options.body) headers['Content-Type'] = 'application/json'
+  const res = await fetch(path, { ...options, headers, body: options.body ? JSON.stringify(options.body) : undefined })
+  let data = {}
+  try { data = await res.json() } catch (_) {}
+  if (res.status === 401) {
+    logout()
+    throw new Error(data.error || 'Нужен вход')
+  }
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status))
+  return data
+}
+
+function showApp() {
+  $('login').style.display = 'none'
+  $('app').style.display = 'block'
+  loadOverview()
+  loadUsers('')
+  loadRooms()
+  loadMedia()
+}
+
+function logout() {
+  token = ''
+  localStorage.removeItem('hc_admin')
+  $('app').style.display = 'none'
+  $('login').style.display = 'block'
+}
+
+async function login() {
+  const password = $('password').value
+  if (!password) return toast('Введите пароль')
+  $('loginBtn').disabled = true
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'Неверный пароль')
+    token = data.token
+    localStorage.setItem('hc_admin', token)
+    $('password').value = ''
+    showApp()
+  } catch (e) {
+    toast(e.message)
+  } finally {
+    $('loginBtn').disabled = false
+  }
+}
+
+function fmtDate(ts) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+function esc(text) {
+  return String(text == null ? '' : text)
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+async function loadOverview() {
+  try {
+    const data = await api('/api/admin/overview')
+    const s = data.stats
+    const cards = [
+      [s.users, 'пользователей'],
+      [s.onlineTokens, 'активных сессий'],
+      [s.messages, 'сообщений'],
+      [s.messages24h, 'сообщений за сутки'],
+      [s.rooms, 'комнат'],
+      [s.banned, 'заблокировано'],
+      [s.new7d, 'новых за 7 дней'],
+      [s.mediaMb + ' МБ', 'медиа'],
+    ]
+    $('stats').innerHTML = cards.map(([n, l]) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${l}</div></div>`).join('')
+    const limit = Number(s.diskLimitMb || 900)
+    const used = Number(s.mediaMb || 0)
+    const pct = Math.min(100, Math.round((used / limit) * 100))
+    $('diskbar').innerHTML =
+      `<div class="row"><span class="muted">Диск (медиа): ${esc(used)} из ${esc(limit)} МБ</span>` +
+      `<div class="grow" style="height:8px;border-radius:6px;background:#0e1324;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct > 85 ? 'var(--bad)' : pct > 60 ? 'var(--warn)' : 'var(--good)'}"></div></div></div>`
+    $('serverInfo').textContent = data.server
+    const recent = data.recent || []
+    $('recent').innerHTML = recent.length
+      ? `<table><thead><tr><th>Пользователь</th><th>Юзернейм</th><th>Шлем</th><th>Регистрация</th></tr></thead><tbody>` +
+        recent.map(u => `<tr><td>${esc(u.displayName)}</td><td class="muted">@${esc(u.username)}</td><td>${u.headsetLabel ? `<span class="pill hset">${esc(u.headsetLabel)}</span>` : '<span class="muted">—</span>'}</td><td class="muted">${fmtDate(u.createdAt)}</td></tr>`).join('') +
+        '</tbody></table>'
+      : '<div class="empty">Пока никто не зарегистрировался</div>'
+    const msgs = data.recentMessages || []
+    $('recentMsgs').innerHTML = msgs.length
+      ? `<table><thead><tr><th>Кто</th><th>Сообщение</th><th>Когда</th></tr></thead><tbody>` +
+        msgs.map(m => `<tr><td>${esc(m.sender)} <span class="muted">@${esc(m.username)}</span></td><td>${m.audio ? '🎤 голосовое' : esc(m.text)}</td><td class="muted">${fmtDate(m.createdAt)}</td></tr>`).join('') +
+        '</tbody></table>'
+      : '<div class="empty">Сообщений пока нет</div>'
+  } catch (e) {
+    toast(e.message)
+  }
+}
+
+async function loadUsers(query) {
+  try {
+    const data = await api('/api/admin/users?q=' + encodeURIComponent(query || ''))
+    const users = data.users || []
+    if (!users.length) {
+      $('users').innerHTML = '<div class="empty">Никого не нашли</div>'
+      return
+    }
+    $('users').innerHTML =
+      '<table><thead><tr><th>Пользователь</th><th>Юзернейм</th><th>Почта</th><th>Шлем</th><th>Сообщений</th><th>Статус</th><th></th></tr></thead><tbody>' +
+      users.map(u => `<tr>
+        <td>${esc(u.displayName)}${u.badge ? ` <span class="pill hset">${esc(u.badge)}</span>` : ''}</td>
+        <td class="muted">@${esc(u.username)}</td>
+        <td class="muted">${u.email ? esc(u.email) : '—'}</td>
+        <td>${u.headsetLabel ? `<span class="pill hset">${esc(u.headsetLabel)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="muted">${u.messages}</td>
+        <td>${u.banned ? `<span class="pill bad">${u.bannedUntil ? 'бан до ' + fmtDate(u.bannedUntil) : 'заблокирован'}</span>` : '<span class="pill ok">активен</span>'}</td>
+        <td class="actions">
+          <button class="mini ghost" onclick="resetPassword('${u.id}')">Сбросить пароль</button>
+          <button class="mini ghost" onclick="setBadge('${u.id}')">Значок</button>
+          ${u.banned
+            ? `<button class="mini ghost" onclick="unbanUser('${u.id}')">Разбанить</button>`
+            : `<button class="mini danger" onclick="banUser('${u.id}')">Забанить</button>`}
+          <button class="mini danger" onclick="deleteUser('${u.id}', '${esc(u.username)}')">Удалить</button>
+        </td>
+      </tr>`).join('') +
+      '</tbody></table>'
+  } catch (e) {
+    toast(e.message)
+  }
+}
+
+async function loadRooms() {
+  try {
+    const data = await api('/api/admin/rooms')
+    const rooms = data.rooms || []
+    if (!rooms.length) {
+      $('rooms').innerHTML = '<div class="empty">Комнат пока нет</div>'
+      return
+    }
+    $('rooms').innerHTML =
+      '<table><thead><tr><th>Комната</th><th>Описание</th><th>Тип</th><th>Владелец</th><th>Участников</th><th>Сообщений</th><th></th></tr></thead><tbody>' +
+      rooms.map(r => `<tr>
+        <td>${esc(r.title)}</td>
+        <td class="muted">${r.description ? esc(r.description) : '—'}</td>
+        <td>${r.isPublic ? '<span class="pill pub">публичная</span>' : '<span class="pill priv">закрытая</span>'}</td>
+        <td class="muted">${r.owner ? '@' + esc(r.owner) : '—'}</td>
+        <td class="muted">${r.members}</td>
+        <td class="muted">${r.messages}</td>
+        <td class="actions"><button class="mini danger" onclick="deleteRoom('${r.id}', '${esc(r.title)}')">Удалить</button></td>
+      </tr>`).join('') +
+      '</tbody></table>'
+  } catch (e) {
+    toast(e.message)
+  }
+}
+
+async function banUser(id) {
+  const input = prompt('На сколько минут забанить? 0 = навсегда', '60')
+  if (input === null) return
+  const duration = parseInt(input, 10)
+  if (isNaN(duration) || duration < 0) return toast('Введите число минут')
+  try {
+    await api('/api/admin/users/' + id + '/ban', { method: 'POST', body: { duration } })
+    toast(duration > 0 ? `Забанен на ${duration} мин` : 'Забанен навсегда')
+    loadUsers($('userQuery').value)
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+async function unbanUser(id) {
+  try {
+    await api('/api/admin/users/' + id + '/unban', { method: 'POST' })
+    toast('Пользователь разблокирован')
+    loadUsers($('userQuery').value)
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+async function setBadge(id) {
+  const badge = prompt('Значок пользователя (пусто — снять)', '')
+  if (badge === null) return
+  try {
+    await api('/api/admin/users/' + id + '/badge', { method: 'POST', body: { badge: badge.trim() } })
+    toast(badge.trim() ? 'Значок выдан' : 'Значок снят')
+    loadUsers($('userQuery').value)
+  } catch (e) { toast(e.message) }
+}
+
+async function resetPassword(id) {
+  if (!confirm('Сбросить пароль? Все сессии пользователя завершатся.')) return
+  try {
+    const data = await api('/api/admin/users/' + id + '/reset', { method: 'POST' })
+    prompt('Новый пароль — передайте его пользователю:', data.password)
+    loadUsers($('userQuery').value)
+  } catch (e) { toast(e.message) }
+}
+
+async function deleteUser(id, username) {
+  if (!confirm('Удалить @' + username + '? Сообщения и друзья тоже удалятся. Это необратимо.')) return
+  try {
+    await api('/api/admin/users/' + id, { method: 'DELETE' })
+    toast('Пользователь удалён')
+    loadUsers($('userQuery').value)
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+async function deleteRoom(id, title) {
+  if (!confirm('Удалить комнату «' + title + '» вместе с сообщениями?')) return
+  try {
+    await api('/api/admin/rooms/' + id, { method: 'DELETE' })
+    toast('Комната удалена')
+    loadRooms()
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+function fmtBytes(bytes) {
+  if (bytes == null) return '—'
+  if (bytes < 1024) return bytes + ' Б'
+  if (bytes < 1_048_576) return (bytes / 1024).toFixed(1) + ' КБ'
+  return (bytes / 1_048_576).toFixed(2) + ' МБ'
+}
+
+async function loadMedia() {
+  try {
+    const data = await api('/api/admin/media')
+    const files = data.files || []
+    $('mediaInfo').textContent = `${fmtBytes(data.total)} · ${data.count} файлов`
+    if (!files.length) {
+      $('media').innerHTML = '<div class="empty">Медиа пока нет</div>'
+      return
+    }
+    $('media').innerHTML =
+      '<table><thead><tr><th>Файл</th><th>Размер</th><th>Возраст</th><th>Тип</th><th></th></tr></thead><tbody>' +
+      files.map(f => `<tr>
+        <td class="muted" style="font-family:monospace;font-size:11px">${esc(f.name)}</td>
+        <td class="muted">${fmtBytes(f.size)}</td>
+        <td class="muted">${Math.round(f.age / 3_600_000)} ч</td>
+        <td>${f.avatar ? '<span class="pill pub">аватар/баннер</span>' : '<span class="pill ok">вложение</span>'}</td>
+        <td class="actions">${f.avatar ? '<span class="muted" style="font-size:11px">не удаляется</span>' : `<button class="mini danger" onclick="deleteMedia('${esc(f.name)}')">Удалить</button>`}</td>
+      </tr>`).join('') +
+      '</tbody></table>'
+  } catch (e) { toast(e.message) }
+}
+
+async function deleteMedia(name) {
+  if (!confirm('Удалить файл ' + name + '?')) return
+  try {
+    await api('/api/admin/media/' + encodeURIComponent(name), { method: 'DELETE' })
+    toast('Файл удалён')
+    loadMedia()
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+async function cleanup() {
+  if (!confirm('Удалить старые вложения (голосовые и файлы)? Аватарки и баннеры не трогаются.')) return
+  try {
+    const data = await api('/api/admin/cleanup', { method: 'POST' })
+    toast('Освобождено: ' + fmtBytes(data.freed))
+    loadMedia()
+    loadOverview()
+  } catch (e) { toast(e.message) }
+}
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b === btn))
+    const tab = btn.dataset.tab
+    ;['overview', 'users', 'rooms', 'media'].forEach(name => {
+      $('tab-' + name).style.display = name === tab ? 'block' : 'none'
+    })
+  })
+})
+
+$('loginBtn').addEventListener('click', login)
+$('password').addEventListener('keydown', e => { if (e.key === 'Enter') login() })
+$('logout').addEventListener('click', logout)
+$('searchBtn').addEventListener('click', () => loadUsers($('userQuery').value))
+$('userQuery').addEventListener('keydown', e => { if (e.key === 'Enter') loadUsers($('userQuery').value) })
+$('reloadUsers').addEventListener('click', () => loadUsers($('userQuery').value))
+$('reloadRooms').addEventListener('click', loadRooms)
+$('reloadMedia').addEventListener('click', loadMedia)
+$('cleanupBtn').addEventListener('click', cleanup)
+
+if (token) showApp()
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "headsetconnector-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Мессенджер-мост между Pico и Meta Quest",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-api.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

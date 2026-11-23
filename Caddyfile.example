@@ -1,0 +1,12 @@
+# Пример конфигурации Caddy: HTTPS без ручных сертификатов.
+# 1. Купите/получите домен и направьте A-запись на IP сервера.
+# 2. Установите Caddy: https://caddyserver.com/docs/install
+# 3. Замените chat.example.com на свой домен и положите файл в /etc/caddy/Caddyfile
+# 4. sudo systemctl reload caddy
+#
+# В systemd-службе HeadsetConnector оставьте TRUST_PROXY=1 (install-ubuntu.sh уже ставит),
+# а порт 8787 закройте снаружи: sudo ufw deny 8787/tcp
+
+chat.example.com {
+    reverse_proxy 127.0.0.1:8787
+}

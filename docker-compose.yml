@@ -1,0 +1,11 @@
+services:
+  server:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - DATA_DIR=/data
+      - TRUST_PROXY=1
+    volumes:
+      - ./data:/data
