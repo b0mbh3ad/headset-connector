@@ -10,7 +10,8 @@
  */
 
 const base = process.argv[2] || 'http://127.0.0.1:8787'
-const adminPassword = process.argv[3] || 'admin123'
+const adminPassword = process.argv[3] || process.env.ADMIN_PASSWORD || 'admin123'
+const adminPath = process.env.ADMIN_PATH || '/admin'
 let failures = 0
 
 function check(name, condition, extra = '') {
@@ -23,7 +24,7 @@ function check(name, condition, extra = '') {
 }
 
 async function call(method, path, { token, admin, body } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = { 'Content-Type': 'application/json', 'X-Admin-Path': adminPath }
   if (token) headers.Authorization = `Bearer ${token}`
   if (admin) headers['X-Admin-Token'] = admin
   const response = await fetch(base + path, {
@@ -48,9 +49,9 @@ async function main() {
 
   console.log(`Сервер: ${base}`)
 
-  const page = await fetch(base + '/admin')
+  const page = await fetch(base + adminPath)
   const html = await page.text()
-  check('страница /admin отдаётся', page.status === 200 && html.includes('Панель управления'))
+  check('страница панели отдаётся', page.status === 200 && html.includes('Панель управления'))
 
   const bad = await call('POST', '/api/admin/login', { body: { password: 'nope' } })
   check('неверный пароль панели (401)', bad.status === 401)
@@ -91,9 +92,25 @@ async function main() {
 
   const badge = await call('POST', `/api/admin/users/${userId}/badge`, {
     admin,
-    body: { badge: 'Проверенный' },
+    body: { badges: ['developer'] },
   })
-  check('значок выдан', badge.status === 200 && badge.data.badge === 'Проверенный')
+  check(
+    'значки выданы',
+    badge.status === 200 && badge.data.badges.length === 1 && badge.data.badgeLabels.includes('Разработчик'),
+    JSON.stringify(badge.data),
+  )
+
+  const badBadge = await call('POST', `/api/admin/users/${userId}/badge`, {
+    admin,
+    body: { badges: ['vip'] },
+  })
+  check('удалённый значок отклонён (400)', badBadge.status === 400)
+
+  const removedBadge = await call('POST', `/api/admin/users/${userId}/badge`, {
+    admin,
+    body: { badges: [] },
+  })
+  check('значки сняты', removedBadge.status === 200 && removedBadge.data.badges.length === 0)
 
   const ban = await call('POST', `/api/admin/users/${userId}/ban`, { admin, body: { duration: 60 } })
   check('бан на время', ban.status === 200 && ban.data.banned === true && !!ban.data.bannedUntil)

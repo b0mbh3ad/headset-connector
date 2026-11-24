@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +43,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -242,29 +246,40 @@ fun PrimaryButton(
     loading: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val ink = Accent.onAccent()
     androidx.compose.material3.Button(
         onClick = onClick,
-        modifier = modifier.height(50.dp),
+        modifier = modifier.heightIn(min = 50.dp),
         enabled = enabled && !loading,
         shape = RoundedCornerShape(14.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
             containerColor = Accent,
-            contentColor = Color.White,
-            disabledContainerColor = Accent.copy(alpha = 0.35f),
-            disabledContentColor = Color.White.copy(alpha = 0.6f),
+            contentColor = ink,
+            disabledContainerColor = Accent.copy(alpha = 0.40f),
+            disabledContentColor = ink.copy(alpha = 0.65f),
         ),
     ) {
         if (loading) {
             androidx.compose.material3.CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
-                color = Color.White,
+                color = ink,
                 strokeWidth = 2.dp,
             )
         } else if (icon != null) {
-            Icon(icon, null, modifier = Modifier.size(18.dp))
+            Icon(icon, null, modifier = Modifier.size(18.dp), tint = ink)
         }
         if (loading || icon != null) Spacer(Modifier.size(8.dp))
-        Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = text,
+            color = ink,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

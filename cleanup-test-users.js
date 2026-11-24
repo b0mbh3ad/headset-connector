@@ -1,12 +1,13 @@
 'use strict'
 
-// Удаляет тестовые аккаунты (alice_/bob_/victim_), оставшиеся после прогонов
-// test-api.js и test-admin.js на реальном сервере.
+// Удаляет тестовые аккаунты (alice_/bob_/victim_/sa_/sb_/ws_ok_), оставшиеся
+// после прогонов test-api.js, test-admin.js и test-signal.js на реальном сервере.
 //
 //   node cleanup-test-users.js https://адрес ПАРОЛЬ_ПАНЕЛИ
 
 const base = (process.argv[2] || '').replace(/\/$/, '')
 const password = process.argv[3]
+const adminPath = process.env.ADMIN_PATH || '/admin'
 
 if (!base || !password) {
   console.error('Использование: node cleanup-test-users.js https://адрес ПАРОЛЬ_ПАНЕЛИ')
@@ -16,18 +17,18 @@ if (!base || !password) {
 async function main() {
   const login = await fetch(base + '/api/admin/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Path': adminPath },
     body: JSON.stringify({ password }),
   })
   if (!login.ok) throw new Error('Вход в панель не удался: HTTP ' + login.status)
   const { token } = await login.json()
-  const headers = { 'X-Admin-Token': token }
+  const headers = { 'X-Admin-Token': token, 'X-Admin-Path': adminPath }
 
   const list = await fetch(base + '/api/admin/users?q=', { headers })
   if (!list.ok) throw new Error('Список пользователей: HTTP ' + list.status)
   const { users } = await list.json()
 
-  const test = users.filter((user) => /^(alice_|bob_|victim_)/.test(user.username))
+  const test = users.filter((user) => /^(alice_|bob_|victim_|sa_|sb_|ws_ok_)/.test(user.username))
   for (const user of test) {
     const res = await fetch(base + '/api/admin/users/' + user.id, { method: 'DELETE', headers })
     console.log(`  ${res.ok ? 'удалён' : 'ОШИБКА'} @${user.username}`)

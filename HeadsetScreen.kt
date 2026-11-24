@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.VideogameAsset
@@ -41,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.headsetconnector.data.AgentApi
 import com.headsetconnector.data.AgentApi.DeviceInfo
 import com.headsetconnector.data.AgentApi.MediaItem
+import com.headsetconnector.net.HeadsetFinder
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,7 +48,7 @@ fun HeadsetScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var host by rememberSaveable { mutableStateOf("") }
+    var host by remember { mutableStateOf("") }
     var pin by rememberSaveable { mutableStateOf("") }
     var device by remember { mutableStateOf<DeviceInfo?>(null) }
     var items by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -82,6 +82,11 @@ fun HeadsetScreen() {
             Column {
                 Text("Шлем", color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 Text("Подключите шлем, где запущен HeadsetConnector", color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "Введите 6-значный код с экрана шлема — приложение само найдёт его в этой сети",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                )
             }
         }
 
@@ -89,14 +94,6 @@ fun HeadsetScreen() {
             CardBox {
                 SectionLabel("ПОДКЛЮЧЕНИЕ")
                 Spacer(Modifier.height(8.dp))
-                Field(
-                    value = host,
-                    onValueChange = { host = it.trim().take(40) },
-                    label = "IP-адрес шлема",
-                    placeholder = "192.168.1.20",
-                    leading = Icons.Rounded.Dns,
-                )
-                Spacer(Modifier.height(10.dp))
                 Field(
                     value = pin,
                     onValueChange = { value -> pin = value.filter { it.isDigit() }.take(6) },
@@ -107,19 +104,25 @@ fun HeadsetScreen() {
                 )
                 Spacer(Modifier.height(12.dp))
                 PrimaryButton(
-                    text = if (busy == "device") "Подключаю…" else "Подключить",
+                    text = if (busy == "device") "Ищу шлем…" else "Подключить",
                     modifier = Modifier.fillMaxWidth(),
                     loading = busy == "device",
-                    enabled = host.isNotBlank() && pin.length >= 4,
+                    enabled = pin.length >= 4,
                     onClick = {
                         scope.launch {
                             busy = "device"
                             error = null
                             try {
-                                device = AgentApi.device(host, pin)
-                                items = emptyList()
+                                val ip = HeadsetFinder.findAgent(pin)
+                                if (ip == null) {
+                                    error = "Шлем не найден в этой сети. Убедитесь, что он включён."
+                                } else {
+                                    host = ip
+                                    device = AgentApi.device(ip, pin)
+                                    items = emptyList()
+                                }
                             } catch (e: Exception) {
-                                error = "Не удалось подключиться. Проверьте IP и код."
+                                error = "Не удалось подключиться. Проверьте код."
                                 device = null
                             } finally {
                                 busy = null

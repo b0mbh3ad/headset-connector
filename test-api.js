@@ -219,9 +219,15 @@ async function main() {
     token: aliceToken,
     body: { audio: { data: voiceBytes, mime: 'audio/mp4', duration: 4 } },
   })
-  check('голосовое отправлено', voice.status === 201 && !!voice.data.message.audioUrl, JSON.stringify(voice.data))
+  check('в комнате нельзя писать (только голосовой чат)', voice.status === 400, JSON.stringify(voice.data))
 
-  const audioUrl = voice.data.message.audioUrl
+  const dmVoice = await call('POST', `/api/chats/${dmId}/messages`, {
+    token: aliceToken,
+    body: { audio: { data: voiceBytes, mime: 'audio/mp4', duration: 4 } },
+  })
+  check('голосовое в личном чате отправлено', dmVoice.status === 201 && !!dmVoice.data.message.audioUrl, JSON.stringify(dmVoice.data))
+
+  const audioUrl = dmVoice.data.message.audioUrl
   const audioResponse = await fetch(base + audioUrl)
   const audioSize = (await audioResponse.arrayBuffer()).byteLength
   check('голосовое скачивается', audioResponse.status === 200 && audioSize === voiceBytesRaw.length, `size=${audioSize}`)
@@ -301,6 +307,32 @@ async function main() {
   check('владелец кикает участника', kick.status === 200)
   const leave = await call('POST', `/api/chats/${kickRoomId}/leave`, { token: bobToken })
   check('выход владельца закрывает комнату', leave.status === 200 && leave.data.closed === true, JSON.stringify(leave.data))
+
+  // Передача владения комнатой.
+  const transRoom = await call('POST', '/api/chats/room', {
+    token: bobToken,
+    body: { title: 'Передача', isPublic: true },
+  })
+  const transRoomId = transRoom.data.chat.id
+  await call('POST', `/api/chats/${transRoomId}/join`, { token: aliceToken })
+  const notOwnerTransfer = await call('POST', `/api/chats/${transRoomId}/owner`, {
+    token: aliceToken,
+    body: { userId: alice.data.user.id },
+  })
+  check('не владелец не может передавать (403)', notOwnerTransfer.status === 403)
+  const transfer = await call('POST', `/api/chats/${transRoomId}/owner`, {
+    token: bobToken,
+    body: { userId: alice.data.user.id },
+  })
+  check(
+    'передача владения',
+    transfer.status === 200 && transfer.data.chat.ownerId === alice.data.user.id,
+    JSON.stringify(transfer.data),
+  )
+  const oldOwnerLeave = await call('POST', `/api/chats/${transRoomId}/leave`, { token: bobToken })
+  check('бывший владелец выходит без закрытия', oldOwnerLeave.status === 200 && oldOwnerLeave.data.closed === false)
+  const newOwnerLeave = await call('POST', `/api/chats/${transRoomId}/leave`, { token: aliceToken })
+  check('новый владелец закрывает комнату', newOwnerLeave.status === 200 && newOwnerLeave.data.closed === true)
 
   console.log(failures === 0 ? '\nВСЁ ОК' : `\nПРОВАЛОВ: ${failures}`)
   process.exit(failures === 0 ? 0 : 1)

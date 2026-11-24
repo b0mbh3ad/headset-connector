@@ -1,20 +1,6 @@
 'use strict'
 
-/**
- * HeadsetConnector — сервер мессенджера для Pico и Meta Quest.
- *
- * Без внешних зависимостей: HTTP на встроенном модуле, база — встроенный SQLite
- * (node:sqlite). Запуск: node server.js
- *
- * Порты и данные:
- *   PORT        — порт HTTP (по умолчанию 8787)
- *   DATA_DIR    — папка для базы и медиа (по умолчанию ./data)
- *   IP / HOST   — адрес прослушивания (хостинги вроде alwaysdata задают сами)
- *
- * Настройки можно положить в файл .env рядом с server.js:
- *   ADMIN_PASSWORD=...
- *   PUBLIC_URL=https://имя.alwaysdata.net
- */
+/* HeadsetConnector server. Runtime configuration is read from the environment. */
 
 const http = require('node:http')
 const fs = require('node:fs')
@@ -68,9 +54,11 @@ db.exec(`
     email TEXT,
     headset TEXT,
     bio TEXT,
+    status TEXT,
     accent TEXT,
     banner TEXT,
     badge TEXT,
+    badges TEXT,
     banned_until INTEGER,
     created_at INTEGER NOT NULL
   );
@@ -148,6 +136,17 @@ if (!hasColumn('banner')) {
 if (!hasColumn('badge')) {
   db.exec('ALTER TABLE users ADD COLUMN badge TEXT')
 }
+if (!hasColumn('badges')) {
+  db.exec('ALTER TABLE users ADD COLUMN badges TEXT')
+  // Переносим старый одиночный значок в массив.
+  const old = db.prepare('SELECT id, badge FROM users WHERE badge IS NOT NULL').all()
+  for (const row of old) {
+    db.prepare('UPDATE users SET badges = ? WHERE id = ?').run(JSON.stringify([row.badge]), row.id)
+  }
+}
+if (!hasColumn('status')) {
+  db.exec('ALTER TABLE users ADD COLUMN status TEXT')
+}
 
 // Почта уникальна без учёта регистра. NULL разрешён — старые аккаунты.
 db.exec(
@@ -171,6 +170,33 @@ let adminHash = ''
 const adminSessions = new Map()
 const ADMIN_TTL = 12 * 60 * 60 * 1000
 
+// Панель не должна висеть на публичном /admin. Адрес задаётся в ADMIN_PATH,
+// а необязательный ADMIN_IPS ограничивает доступ списком IP через запятую.
+const ADMIN_PATH = (() => {
+  let value = String(process.env.ADMIN_PATH || '/admin').trim()
+  if (!value.startsWith('/')) value = '/' + value
+  value = value.replace(/\/+$/, '')
+  return value || '/admin'
+})()
+const ADMIN_IPS = String(process.env.ADMIN_IPS || '')
+  .split(',')
+  .map((value) => value.trim().replace(/^::ffff:/, ''))
+  .filter(Boolean)
+
+function adminPathOk(req) {
+  const value = String(req.headers['x-admin-path'] || '')
+  return !!value && value === ADMIN_PATH
+}
+
+function adminIpOk(req) {
+  if (!ADMIN_IPS.length) return true
+  return ADMIN_IPS.includes(clientIp(req).replace(/^::ffff:/, ''))
+}
+
+function adminRequestOk(req) {
+  return adminPathOk(req) && adminIpOk(req)
+}
+
 function makeHash(password, salt = crypto.randomBytes(16).toString('hex')) {
   return `${salt}:${crypto.scryptSync(password, salt, 32).toString('hex')}`
 }
@@ -187,7 +213,7 @@ function initAdmin() {
   if (ADMIN_ENV) {
     adminHash = makeHash(ADMIN_ENV)
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_hash', ?)").run(adminHash)
-    console.log('  админ-пароль: из ADMIN_PASSWORD')
+    console.log('  admin password: from ADMIN_PASSWORD')
     return
   }
   const saved = db.prepare("SELECT value FROM settings WHERE key = 'admin_hash'").get()
@@ -199,8 +225,8 @@ function initAdmin() {
   adminHash = makeHash(generated)
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('admin_hash', ?)").run(adminHash)
   console.log('')
-  console.log('  Пароль для панели /admin: ' + generated)
-  console.log('  Сохранён в базе. Изменить: ADMIN_PASSWORD=новый node server.js')
+  console.log('  admin password: ' + generated)
+  console.log('  saved in the database')
   console.log('')
 }
 
@@ -255,6 +281,7 @@ function getUserByEmail(email) {
 
 function publicUser(user) {
   if (!user) return null
+  const badges = userBadges(user)
   return {
     id: user.id,
     username: user.username,
@@ -263,15 +290,59 @@ function publicUser(user) {
     headset: user.headset || null,
     headsetLabel: headsetLabel(user.headset),
     bio: user.bio || null,
+    status: user.status || null,
     accent: user.accent || null,
     banner: user.banner || null,
-    badge: user.badge || null,
+    badges,
+    badgeLabels: badges.map(badgeLabel).filter(Boolean),
+    badge: badges[0] || null,
+    badgeLabel: badgeLabel(badges[0]),
+    createdAt: user.created_at || 0,
   }
+}
+
+// Достижения считаются из реальных действий, а не хранятся отдельно.
+function userAchievements(user) {
+  if (!user) return []
+  const id = user.id
+  const count = (sql, ...params) => db.prepare(sql).get(...params).n || 0
+  const friends = count(
+    "SELECT count(*) AS n FROM friends WHERE status = 'accepted' AND (a = ? OR b = ?)",
+    id,
+    id,
+  )
+  const messages = count('SELECT count(*) AS n FROM messages WHERE sender_id = ?', id)
+  const rooms = count("SELECT count(*) AS n FROM chats WHERE type = 'room' AND owner_id = ?", id)
+  const joined = count(
+    `SELECT count(DISTINCT m.chat_id) AS n FROM chat_members m
+     JOIN chats c ON c.id = m.chat_id WHERE m.user_id = ? AND c.type = 'room'`,
+    id,
+  )
+  const ageDays = user.created_at ? (Date.now() - user.created_at) / 86_400_000 : 0
+  const has = (key) => userBadges(user).includes(key)
+
+  const list = []
+  const add = (key, label, icon) => list.push({ key, label, icon })
+  add('newcomer', 'Новичок', '🌱')
+  if (friends >= 1) add('first_friend', 'Первый друг', '🤝')
+  if (friends >= 5) add('social', 'Душа компании', '🫂')
+  if (messages >= 25) add('talker', 'Болтун', '💬')
+  if (messages >= 250) add('speaker', 'Оратор', '📣')
+  if (rooms >= 1) add('host', 'Хозяин комнаты', '🏠')
+  if (joined >= 3) add('onair', 'В эфире', '🎙')
+  if (ageDays >= 30) add('veteran', 'Ветеран', '🏅')
+  if (has('developer')) add('developer', 'Разработчик', '🛡')
+  return list
+}
+
+// Расширенный профиль для карточки друга: достижения и оформление.
+function profileUser(user) {
+  return { ...publicUser(user), achievements: userAchievements(user) }
 }
 
 // Свой профиль: добавляет почту, которую другим не показываем.
 function privateUser(user) {
-  return { ...publicUser(user), email: user.email || null }
+  return { ...profileUser(user), email: user.email || null }
 }
 
 // Бан по расписанию: banned_until = 0 значит «навсегда», иначе — момент разбана.
@@ -286,22 +357,66 @@ function clearExpiredBan(user) {
   }
 }
 
+const TOKEN_TTL = Math.max(1, Number(process.env.TOKEN_TTL_DAYS || 120)) * 86_400_000
+
 function issueToken(userId) {
   const value = token()
   db.prepare('INSERT INTO tokens (token, user_id, created_at) VALUES (?, ?, ?)')
     .run(value, userId, now())
+  // Держим не больше 10 активных устройств на аккаунт.
+  db.prepare(
+    `DELETE FROM tokens WHERE user_id = ? AND token NOT IN (
+       SELECT token FROM tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 10
+     )`,
+  ).run(userId, userId)
   return value
 }
 
 function userByToken(value) {
   if (!value) return null
   const user = db.prepare(
-    `SELECT u.* FROM users u JOIN tokens t ON t.user_id = u.id WHERE t.token = ?`,
+    `SELECT u.*, t.created_at AS token_created_at
+     FROM users u JOIN tokens t ON t.user_id = u.id WHERE t.token = ?`,
   ).get(value)
   if (!user) return null
+  if (Date.now() - (user.token_created_at || 0) > TOKEN_TTL) {
+    db.prepare('DELETE FROM tokens WHERE token = ?').run(value)
+    return null
+  }
   clearExpiredBan(user)
   if (banActive(user)) return null
   return user
+}
+
+// Полное удаление аккаунта: связи, сообщения, вложения и личные файлы.
+function deleteUserAccount(user) {
+  if (!user) return
+  const files = db.prepare(
+    'SELECT audio_url FROM messages WHERE sender_id = ? AND audio_url IS NOT NULL',
+  ).all(user.id)
+  for (const row of files) {
+    try {
+      fs.unlinkSync(path.join(MEDIA_DIR, path.basename(row.audio_url)))
+    } catch (_) {
+      // файла уже нет
+    }
+  }
+  db.prepare('DELETE FROM messages WHERE sender_id = ?').run(user.id)
+  db.prepare('DELETE FROM chat_members WHERE user_id = ?').run(user.id)
+  db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').run(user.id, user.id)
+  db.prepare('DELETE FROM tokens WHERE user_id = ?').run(user.id)
+  db.prepare('DELETE FROM users WHERE id = ?').run(user.id)
+  // Комнаты без участников закрываем, у остальных снимаем владельца.
+  db.prepare('UPDATE chats SET owner_id = NULL WHERE owner_id = ?').run(user.id)
+  db.prepare('DELETE FROM chats WHERE id NOT IN (SELECT chat_id FROM chat_members)').run()
+  for (const value of [user.avatar, user.banner]) {
+    if (!value) continue
+    try {
+      fs.unlinkSync(path.join(MEDIA_DIR, path.basename(value)))
+    } catch (_) {
+      // файла уже нет
+    }
+  }
 }
 
 // ------------------------------------------------------------------ chats
@@ -372,6 +487,7 @@ function chatView(chat, me) {
     members: members.map(publicUser),
     memberCount: members.length,
     lastMessage: lastMessage(chat.id),
+    headsetLabel: dm ? (others[0] ? others[0].headsetLabel : null) : null,
     createdAt: chat.created_at,
   }
 }
@@ -560,6 +676,36 @@ function headsetLabel(key) {
   return found ? found.label : null
 }
 
+// Значки, которые админ выдаёт пользователям. Ключ хранится в базе,
+// label видит человек. Никаких цифр — только понятные названия.
+// Сейчас доступен только разработчик; больше никаких ролевых тегов нет.
+const BADGES = [
+  { key: 'developer', label: 'Разработчик' },
+]
+const BADGE_KEYS = new Set(BADGES.map((item) => item.key))
+
+function badgeLabel(key) {
+  const found = BADGES.find((item) => item.key === key)
+  return found ? found.label : null
+}
+
+// У пользователя может быть несколько значков: в колонке badges лежит JSON-массив.
+// Старая колонка badge остаётся первым значком — для совместимости.
+function userBadges(user) {
+  if (!user) return []
+  let list = []
+  if (user.badges) {
+    try {
+      const parsed = JSON.parse(user.badges)
+      if (Array.isArray(parsed)) list = parsed
+    } catch (_) {
+      // битый JSON игнорируем
+    }
+  }
+  if (!list.length && user.badge) list = [user.badge]
+  return [...new Set(list.map(String).filter((key) => BADGE_KEYS.has(key)))]
+}
+
 function validEmail(value) {
   const email = String(value || '').trim()
   if (email.length < 6 || email.length > 120) return false
@@ -659,14 +805,32 @@ const server = http.createServer(async (req, res) => {
     return res.end(html)
   }
 
-  if (pathname === '/admin' || pathname === '/admin/' || pathname === '/admin.html') {
+  if (
+    pathname === ADMIN_PATH ||
+    pathname === `${ADMIN_PATH}/` ||
+    pathname === `${ADMIN_PATH}.html`
+  ) {
+    if (!adminIpOk(req)) return fail(res, 404, 'Не найдено')
     const file = path.join(__dirname, 'admin.html')
     if (!fs.existsSync(file)) return fail(res, 500, 'admin.html не найден рядом с server.js')
+    const html = fs
+      .readFileSync(file, 'utf8')
+      .replace(
+        '</head>',
+        `<script>window.HC_ADMIN_PATH=${JSON.stringify(ADMIN_PATH)}</script></head>`,
+      )
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'Content-Security-Policy':
+        "default-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
     })
-    return fs.createReadStream(file).pipe(res)
+    return res.end(html)
   }
 
   // APK для автообновления приложения.
@@ -709,6 +873,8 @@ const server = http.createServer(async (req, res) => {
 
     // --------------------------------------------------------------- панель
     if (pathname === '/api/admin/login' && req.method === 'POST') {
+      // Без секретного пути и разрешённого IP панель выглядит как обычный 404.
+      if (!adminRequestOk(req)) return fail(res, 404, 'Не найдено')
       if (tooManyAttempts(req, 'admin_login', 8, 300_000)) {
         return fail(res, 429, 'Слишком много попыток. Подождите 5 минут.')
       }
@@ -723,6 +889,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname.startsWith('/api/admin/')) {
+      if (!adminRequestOk(req)) return fail(res, 404, 'Не найдено')
       if (!adminAuthorized(req)) return fail(res, 401, 'Нужен вход в панель')
 
       if (pathname === '/api/admin/logout' && req.method === 'POST') {
@@ -828,10 +995,26 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (userAction[2] === 'badge') {
-          const badge = String(body.badge || '').trim().slice(0, 24) || null
-          db.prepare('UPDATE users SET badge = ? WHERE id = ?').run(badge, id)
-          console.log(`Панель: значок @${user.username} -> ${badge || 'снят'}`)
-          return json(res, 200, { ok: true, badge })
+          let keys
+          if (Array.isArray(body.badges)) {
+            keys = body.badges.map((value) => String(value).trim())
+          } else {
+            keys = body.badge ? [String(body.badge).trim()] : []
+          }
+          const unknown = keys.find((key) => !BADGE_KEYS.has(key))
+          if (unknown) return fail(res, 400, 'Неизвестный значок')
+          keys = [...new Set(keys)]
+          db.prepare('UPDATE users SET badges = ?, badge = ? WHERE id = ?')
+            .run(JSON.stringify(keys), keys[0] || null, id)
+          const labels = keys.map(badgeLabel).filter(Boolean)
+          console.log(`Панель: значки @${user.username} -> ${labels.join(', ') || 'сняты'}`)
+          return json(res, 200, {
+            ok: true,
+            badges: keys,
+            badgeLabels: labels,
+            badge: keys[0] || null,
+            badgeLabel: labels[0] || null,
+          })
         }
 
         const password = crypto.randomBytes(5).toString('base64url')
@@ -847,22 +1030,7 @@ const server = http.createServer(async (req, res) => {
       if (userDelete && req.method === 'DELETE') {
         const user = getUser(userDelete[1])
         if (!user) return fail(res, 404, 'Пользователь не найден')
-
-        db.prepare('DELETE FROM messages WHERE sender_id = ?').run(user.id)
-        db.prepare('DELETE FROM chat_members WHERE user_id = ?').run(user.id)
-        db.prepare('DELETE FROM friends WHERE a = ? OR b = ?').run(user.id, user.id)
-        db.prepare('DELETE FROM tokens WHERE user_id = ?').run(user.id)
-        db.prepare('DELETE FROM users WHERE id = ?').run(user.id)
-        db.prepare('DELETE FROM chats WHERE id NOT IN (SELECT chat_id FROM chat_members)').run()
-
-        if (user.avatar) {
-          try {
-            fs.unlinkSync(path.join(MEDIA_DIR, path.basename(user.avatar)))
-          } catch (_) {
-            // файла уже нет
-          }
-        }
-
+        deleteUserAccount(user)
         console.log(`Панель: удалён @${user.username}`)
         return json(res, 200, { ok: true })
       }
@@ -963,7 +1131,7 @@ const server = http.createServer(async (req, res) => {
       if (!validUsername(username)) {
         return fail(res, 400, 'Логин: 3–20 символов, латиница, цифры и _')
       }
-      if (password.length < 6) return fail(res, 400, 'Пароль минимум 6 символов')
+      if (password.length < 8) return fail(res, 400, 'Пароль минимум 8 символов')
       if (!validEmail(email)) return fail(res, 400, 'Укажите настоящую почту')
       if (!HEADSET_KEYS.has(headset)) return fail(res, 400, 'Выберите модель шлема')
       if (getUserByName(username)) return fail(res, 409, 'Такой логин уже занят')
@@ -1012,6 +1180,7 @@ const server = http.createServer(async (req, res) => {
         return fail(res, 400, 'Неизвестная модель шлема')
       }
       const bio = body.bio === undefined ? null : String(body.bio || '').trim().slice(0, 200)
+      const status = body.status === undefined ? null : String(body.status || '').trim().slice(0, 60)
       const accent = body.accent === undefined ? null : normalizeAccent(body.accent)
       if (accent !== null && accent === false) {
         return fail(res, 400, 'Неверный цвет акцента')
@@ -1020,10 +1189,18 @@ const server = http.createServer(async (req, res) => {
         `UPDATE users SET display_name = COALESCE(?, display_name),
            headset = COALESCE(?, headset),
            bio = COALESCE(?, bio),
+           status = COALESCE(?, status),
            accent = COALESCE(?, accent)
          WHERE id = ?`,
-      ).run(displayName, headset, bio, accent, me.id)
+      ).run(displayName, headset, bio, status, accent, me.id)
       return json(res, 200, { user: privateUser(getUser(me.id)) })
+    }
+
+    if (pathname === '/api/me' && req.method === 'DELETE') {
+      const username = me.username
+      deleteUserAccount(me)
+      console.log(`Аккаунт удалён самим пользователем: @${username}`)
+      return json(res, 200, { ok: true })
     }
 
     if (pathname === '/api/me/avatar' && req.method === 'POST') {
@@ -1057,7 +1234,7 @@ const server = http.createServer(async (req, res) => {
             if (state.status === 'accepted') relation = 'friends'
             else relation = state.requested_by === me.id ? 'outgoing' : 'incoming'
           }
-          return { ...publicUser(row), relation }
+          return { ...profileUser(row), relation }
         }),
       })
     }
@@ -1074,7 +1251,7 @@ const server = http.createServer(async (req, res) => {
         const otherId = row.a === me.id ? row.b : row.a
         const other = getUser(otherId)
         if (!other) continue
-        const item = { ...publicUser(other), since: row.created_at }
+        const item = { ...profileUser(other), since: row.created_at }
         if (row.status === 'accepted') friends.push(item)
         else if (row.requested_by === me.id) outgoing.push(item)
         else incoming.push(item)
@@ -1258,6 +1435,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { chat: chatView(updated, me.id) })
     }
 
+    // Передать владение комнатой другому участнику (только владелец).
+    const ownerRoute = pathname.match(/^\/api\/chats\/([^/]+)\/owner$/)
+    if (ownerRoute && req.method === 'POST') {
+      const chat = db.prepare('SELECT * FROM chats WHERE id = ? AND type = ?').get(ownerRoute[1], 'room')
+      if (!chat) return fail(res, 404, 'Комната не найдена')
+      if (chat.owner_id !== me.id) return fail(res, 403, 'Передавать может только владелец')
+      const newOwnerId = String(body.userId || '')
+      if (newOwnerId === me.id) return fail(res, 400, 'Ты уже владелец')
+      if (!isMember(chat.id, newOwnerId)) return fail(res, 400, 'Этот человек не в комнате')
+      db.prepare('UPDATE chats SET owner_id = ? WHERE id = ?').run(newOwnerId, chat.id)
+      console.log(`Комната «${chat.title}» передана @${(getUser(newOwnerId) || {}).username || newOwnerId}`)
+      const updated = db.prepare('SELECT * FROM chats WHERE id = ?').get(chat.id)
+      return json(res, 200, { chat: chatView(updated, me.id) })
+    }
+
     const messagesRoute = pathname.match(/^\/api\/chats\/([^/]+)\/messages$/)
     if (messagesRoute) {
       const chatId = messagesRoute[1]
@@ -1279,6 +1471,10 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === 'POST') {
+        // В комнатах (публичных и по коду) только голос — текст пишем в личные чаты.
+        if (chat.type !== 'dm') {
+          return fail(res, 400, 'В комнатах только голос — текст пишется в личных чатах')
+        }
         const text = String(body.text || '').trim().slice(0, 4000)
         let audioUrl = null
         let audioDuration = null
@@ -1320,6 +1516,230 @@ function randomCode() {
 }
 
 initAdmin()
+
+// --------------------------------------------------- сигналинг голосовых (WebSocket)
+//
+// Мини-реализация WebSocket без зависимостей. Комнаты голоса:
+// клиент шлёт offer/answer/ice друг другу через этот сервер (mesh, до ~6 человек).
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+const voiceRooms = new Map() // roomId -> Map<userId, connection>
+
+function wsAccept(key) {
+  return crypto.createHash('sha1').update(String(key) + WS_GUID).digest('base64')
+}
+
+function wsEncode(payload) {
+  const text = Buffer.from(String(payload), 'utf8')
+  const length = text.length
+  let header
+  if (length < 126) {
+    header = Buffer.alloc(2)
+    header[1] = length
+  } else if (length < 65536) {
+    header = Buffer.alloc(4)
+    header[1] = 126
+    header.writeUInt16BE(length, 2)
+  } else {
+    header = Buffer.alloc(10)
+    header[1] = 127
+    header.writeBigUInt64BE(BigInt(length), 2)
+  }
+  header[0] = 0x81 // FIN + text, без маски (сервер → клиент)
+  return Buffer.concat([header, text])
+}
+
+// Возвращает null, если кадр ещё не дочитан, иначе { text? , close? , consumed }.
+function wsDecode(buffer) {
+  if (buffer.length < 2) return null
+  const fin = (buffer[0] & 0x80) !== 0
+  const opcode = buffer[0] & 0x0f
+  const masked = (buffer[1] & 0x80) !== 0
+  let length = buffer[1] & 0x7f
+  let offset = 2
+  if (length === 126) {
+    if (buffer.length < 4) return null
+    length = buffer.readUInt16BE(2)
+    offset = 4
+  } else if (length === 127) {
+    if (buffer.length < 10) return null
+    length = Number(buffer.readBigUInt64BE(2))
+    offset = 10
+  }
+  let mask = null
+  if (masked) {
+    if (buffer.length < offset + 4) return null
+    mask = buffer.subarray(offset, offset + 4)
+    offset += 4
+  }
+  if (buffer.length < offset + length) return null
+  let payload = buffer.subarray(offset, offset + length)
+  if (masked && mask) {
+    const out = Buffer.alloc(payload.length)
+    for (let i = 0; i < payload.length; i += 1) out[i] = payload[i] ^ mask[i % 4]
+    payload = out
+  }
+  if (opcode === 0x8) return { close: true, consumed: offset + length }
+  if (opcode === 0x9) return { ping: true, consumed: offset + length }
+  if (!fin || opcode !== 0x1) return { close: true, consumed: offset + length }
+  return { text: payload.toString('utf8'), consumed: offset + length }
+}
+
+server.on('upgrade', (req, socket) => {
+  let pathname = '/'
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname
+  } catch (_) {
+    // некорректный адрес
+  }
+  if (pathname !== '/ws') {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+    socket.destroy()
+    return
+  }
+  const key = req.headers['sec-websocket-key']
+  if (!key) {
+    socket.destroy()
+    return
+  }
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`,
+  )
+
+  const conn = { userId: null, roomId: null, socket, buffer: Buffer.alloc(0) }
+
+  function send(obj) {
+    try {
+      socket.write(wsEncode(JSON.stringify(obj)))
+    } catch (_) {
+      // сокет закрыт
+    }
+  }
+
+  function roomPeers() {
+    return conn.roomId ? voiceRooms.get(conn.roomId) : null
+  }
+
+  function broadcast(obj, exceptUserId) {
+    const peers = roomPeers()
+    if (!peers) return
+    for (const [userId, peer] of peers) {
+      if (userId === exceptUserId) continue
+      try {
+        peer.socket.write(wsEncode(JSON.stringify(obj)))
+      } catch (_) {
+        // пропускаем
+      }
+    }
+  }
+
+  function leave() {
+    if (conn.roomId && conn.userId) {
+      const peers = voiceRooms.get(conn.roomId)
+      if (peers) {
+        peers.delete(conn.userId)
+        if (peers.size === 0) voiceRooms.delete(conn.roomId)
+        broadcast({ type: 'peer-left', userId: conn.userId })
+      }
+      conn.roomId = null
+      conn.userId = null
+    }
+  }
+
+  function handle(text) {
+    let msg
+    try {
+      msg = JSON.parse(text)
+    } catch (_) {
+      return
+    }
+    switch (msg.type) {
+      case 'join': {
+        const user = userByToken(String(msg.token || ''))
+        if (!user) {
+          send({ type: 'error', error: 'Нужен вход' })
+          socket.destroy()
+          return
+        }
+        const roomId = String(msg.roomId || '')
+        if (!isMember(roomId, user.id)) {
+          send({ type: 'error', error: 'Ты не в этой комнате' })
+          return
+        }
+        leave()
+        conn.userId = user.id
+        conn.roomId = roomId
+        if (!voiceRooms.has(roomId)) voiceRooms.set(roomId, new Map())
+        const peers = voiceRooms.get(roomId)
+        const existing = peers.get(user.id)
+        if (existing) {
+          try {
+            existing.socket.destroy()
+          } catch (_) {
+            // уже закрыт
+          }
+        }
+        peers.set(user.id, conn)
+        const users = [...peers.keys()].map((id) => {
+          const u = getUser(id)
+          return { id, username: u ? u.username : '?', displayName: u ? u.display_name : '?' }
+        })
+        send({ type: 'joined', roomId, users })
+        broadcast(
+          { type: 'peer-joined', user: { id: user.id, username: user.username, displayName: user.display_name } },
+          user.id,
+        )
+        return
+      }
+      case 'leave':
+        leave()
+        return
+      case 'offer':
+      case 'answer':
+      case 'ice': {
+        if (!conn.userId || !conn.roomId) return
+        const targetId = String(msg.to || '')
+        const peers = voiceRooms.get(conn.roomId)
+        const target = peers ? peers.get(targetId) : null
+        if (target) {
+          const forwarded = { ...msg, from: conn.userId }
+          delete forwarded.to
+          try {
+            target.socket.write(wsEncode(JSON.stringify(forwarded)))
+          } catch (_) {
+            // пропускаем
+          }
+        }
+        return
+      }
+      case 'speaking':
+        if (conn.userId && conn.roomId) {
+          broadcast({ type: 'speaking', userId: conn.userId, speaking: !!msg.speaking }, conn.userId)
+        }
+        return
+    }
+  }
+
+  socket.on('data', (chunk) => {
+    conn.buffer = Buffer.concat([conn.buffer, chunk])
+    let frame
+    while ((frame = wsDecode(conn.buffer)) !== null) {
+      conn.buffer = conn.buffer.subarray(frame.consumed)
+      if (frame.close) {
+        leave()
+        socket.destroy()
+        return
+      }
+      if (frame.ping) continue
+      if (frame.text) handle(frame.text)
+    }
+  })
+
+  socket.on('close', leave)
+  socket.on('error', leave)
+})
 
 // Хостинги вроде alwaysdata дают готовый адрес и порт в переменных IP/PORT —
 // тогда слушаем именно их, иначе все интерфейсы (домашний Wi-Fi, VPS).

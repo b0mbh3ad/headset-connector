@@ -1,6 +1,7 @@
 package com.headsetconnector.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -57,6 +58,7 @@ fun FriendsScreen(vm: ConnectorViewModel) {
 
     var query by rememberSaveable { mutableStateOf("") }
     var removeTarget by remember { mutableStateOf<User?>(null) }
+    var profileTarget by remember { mutableStateOf<User?>(null) }
 
     LaunchedEffect(query) {
         delay(400)
@@ -99,7 +101,9 @@ fun FriendsScreen(vm: ConnectorViewModel) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 5.dp),
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { profileTarget = user }
+                                .padding(vertical = 5.dp, horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Avatar(user.avatar, user.displayName, 40.dp)
@@ -152,9 +156,12 @@ fun FriendsScreen(vm: ConnectorViewModel) {
                         Hint("Никого не нашли. Юзернейм чувствителен к регистру? Нет, но проверьте раскладку.")
                     } else {
                         results.forEach { user ->
-                            SearchRow(user, onAdd = { vm.addFriend(user.username) }, onChat = {
-                                vm.openDirect(user.username)
-                            })
+                            SearchRow(
+                                user = user,
+                                onOpen = { profileTarget = user },
+                                onAdd = { vm.addFriend(user.username) },
+                                onChat = { vm.openDirect(user.username) },
+                            )
                         }
                     }
                 }
@@ -172,7 +179,9 @@ fun FriendsScreen(vm: ConnectorViewModel) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 5.dp),
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { profileTarget = user }
+                                .padding(vertical = 5.dp, horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Avatar(user.avatar, user.displayName, 42.dp)
@@ -189,6 +198,9 @@ fun FriendsScreen(vm: ConnectorViewModel) {
                                 Text("@${user.username}", color = TextSecondary, fontSize = 11.sp)
                                 user.headsetLabel?.let {
                                     Text(it, color = Accent2, fontSize = 10.sp)
+                                }
+                                user.badgeLabels.ifEmpty { listOfNotNull(user.badgeLabel) }.forEach { label ->
+                                    Text(label, color = Good, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                             IconButton(onClick = { vm.openDirect(user.username) }) {
@@ -258,14 +270,44 @@ fun FriendsScreen(vm: ConnectorViewModel) {
             },
         )
     }
+
+    profileTarget?.let { user ->
+        UserProfileDialog(
+            user = user,
+            onDismiss = { profileTarget = null },
+            onChat = {
+                profileTarget = null
+                vm.openDirect(user.username)
+            },
+            onAddFriend = {
+                profileTarget = null
+                vm.addFriend(user.username)
+            },
+            onRemoveFriend = {
+                profileTarget = null
+                removeTarget = user
+            },
+            onAnswerFriend = { accept ->
+                profileTarget = null
+                vm.answerFriend(user, accept)
+            },
+        )
+    }
 }
 
 @Composable
-private fun SearchRow(user: User, onAdd: () -> Unit, onChat: () -> Unit) {
+private fun SearchRow(
+    user: User,
+    onOpen: () -> Unit,
+    onAdd: () -> Unit,
+    onChat: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp),
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 5.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(user.avatar, user.displayName, 40.dp)
@@ -282,6 +324,9 @@ private fun SearchRow(user: User, onAdd: () -> Unit, onChat: () -> Unit) {
             Text("@${user.username}", color = TextSecondary, fontSize = 11.sp)
             user.headsetLabel?.let {
                 Text(it, color = Accent2, fontSize = 10.sp)
+            }
+            user.badgeLabels.ifEmpty { listOfNotNull(user.badgeLabel) }.forEach { label ->
+                Text(label, color = Good, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
         when (user.relation) {

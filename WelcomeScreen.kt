@@ -159,7 +159,7 @@ fun WelcomeScreen(vm: ConnectorViewModel) {
                     value = password,
                     onValueChange = { password = it.take(64) },
                     label = "Пароль",
-                    placeholder = "минимум 6 символов",
+                    placeholder = "минимум 8 символов",
                     password = true,
                     leading = Icons.Rounded.Lock,
                 )
@@ -170,9 +170,9 @@ fun WelcomeScreen(vm: ConnectorViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     loading = busy != null,
                     enabled = if (register) {
-                        username.trim().length >= 3 && password.length >= 6 && emailValid && headset.isNotBlank()
+                        username.trim().length >= 3 && password.length >= 8 && emailValid && headset.isNotBlank()
                     } else {
-                        username.trim().isNotEmpty() && password.length >= 6
+                        username.trim().isNotEmpty() && password.length >= 8
                     },
                     onClick = {
                         if (register) {
@@ -185,7 +185,7 @@ fun WelcomeScreen(vm: ConnectorViewModel) {
 
                 if (register) {
                     Spacer(Modifier.height(8.dp))
-                    Hint("Логин: 3–20 символов, латиница, цифры и _. Пароль от 6 символов.")
+                    Hint("Логин: 3–20 символов, латиница, цифры и _. Пароль от 8 символов.")
                 }
             }
         }

@@ -46,6 +46,14 @@ class Prefs(context: Context) {
         get() = sp.getString("bio", null)
         set(value) = sp.edit().putString("bio", value).apply()
 
+    var status: String?
+        get() = sp.getString("status", null)
+        set(value) = sp.edit().putString("status", value).apply()
+
+    var createdAt: Long
+        get() = sp.getLong("created_at", 0L)
+        set(value) = sp.edit().putLong("created_at", value).apply()
+
     var accent: String?
         get() = sp.getString("accent", null)
         set(value) = sp.edit().putString("accent", value).apply()
@@ -58,9 +66,17 @@ class Prefs(context: Context) {
         get() = sp.getString("badge", null)
         set(value) = sp.edit().putString("badge", value).apply()
 
-    var theme: String
-        get() = sp.getString("theme", "normal").orEmpty()
-        set(value) = sp.edit().putString("theme", value).apply()
+    var badgeLabel: String?
+        get() = sp.getString("badgeLabel", null)
+        set(value) = sp.edit().putString("badgeLabel", value).apply()
+
+    var badges: List<String>
+        get() = sp.getString("badges", "").orEmpty().split("|").filter { it.isNotBlank() }
+        set(value) = sp.edit().putString("badges", value.joinToString("|")).apply()
+
+    var badgeLabels: List<String>
+        get() = sp.getString("badgeLabels", "").orEmpty().split("|").filter { it.isNotBlank() }
+        set(value) = sp.edit().putString("badgeLabels", value.joinToString("|")).apply()
 
     // Код для подключения телефона к агенту на шлеме (как в PicoPilot).
     var agentPin: String
@@ -91,9 +107,14 @@ class Prefs(context: Context) {
             .remove("headset")
             .remove("headset_label")
             .remove("bio")
+            .remove("status")
+            .remove("created_at")
             .remove("accent")
             .remove("banner")
             .remove("badge")
+            .remove("badgeLabel")
+            .remove("badges")
+            .remove("badgeLabels")
             .apply()
     }
 }

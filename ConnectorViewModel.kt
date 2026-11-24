@@ -8,7 +8,6 @@ import com.headsetconnector.BuildConfig
 import com.headsetconnector.audio.VoicePlayer
 import com.headsetconnector.audio.VoiceRecorder
 import com.headsetconnector.data.Api
-import com.headsetconnector.data.AppTheme
 import com.headsetconnector.data.AppUpdate
 import com.headsetconnector.data.Chat
 import com.headsetconnector.data.FriendsData
@@ -17,6 +16,7 @@ import com.headsetconnector.data.Message
 import com.headsetconnector.data.Prefs
 import com.headsetconnector.data.Room
 import com.headsetconnector.data.User
+import com.headsetconnector.data.versionNumber
 import com.headsetconnector.net.ServerFinder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +49,6 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
     val recordingSeconds = MutableStateFlow(0)
     val playing = MutableStateFlow<String?>(null)
     val updateAvailable = MutableStateFlow<AppUpdate?>(null)
-    val theme = MutableStateFlow(if (prefs.theme == "material") AppTheme.MATERIAL else AppTheme.NORMAL)
     val agentPin = MutableStateFlow(prefs.agentPin)
 
     private var pollJob: Job? = null
@@ -82,9 +81,14 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
                 headset = prefs.headset,
                 headsetLabel = prefs.headsetLabel,
                 bio = prefs.bio,
+                status = prefs.status,
                 accent = prefs.accent,
                 banner = prefs.banner,
+                createdAt = prefs.createdAt,
                 badge = prefs.badge,
+                badgeLabel = prefs.badgeLabel,
+                badges = prefs.badges,
+                badgeLabels = prefs.badgeLabels,
             )
             startPolling()
             viewModelScope.launch {
@@ -185,9 +189,14 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.headset = me.headset
         prefs.headsetLabel = me.headsetLabel
         prefs.bio = me.bio
+        prefs.status = me.status
         prefs.accent = me.accent
         prefs.banner = me.banner
+        prefs.createdAt = me.createdAt
         prefs.badge = me.badge
+        prefs.badgeLabel = me.badgeLabel
+        prefs.badges = me.badges
+        prefs.badgeLabels = me.badgeLabels
         session.value = me
     }
 
@@ -251,11 +260,37 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun saveProfile(bio: String?, accent: String?, headset: String?) {
+    fun saveProfile(
+        displayName: String?,
+        bio: String?,
+        status: String?,
+        accent: String?,
+        headset: String?,
+    ) {
         viewModelScope.launch {
             try {
-                saveMe(Api.updateProfile(bio = bio, accent = accent, headset = headset))
+                saveMe(
+                    Api.updateProfile(
+                        displayName = displayName,
+                        bio = bio,
+                        status = status,
+                        accent = accent,
+                        headset = headset,
+                    ),
+                )
                 message.value = "Профиль обновлён"
+            } catch (e: Exception) {
+                message.value = e.message
+            }
+        }
+    }
+
+    fun deleteAccount() {
+        viewModelScope.launch {
+            try {
+                Api.deleteAccount()
+                logout()
+                message.value = "Аккаунт удалён"
             } catch (e: Exception) {
                 message.value = e.message
             }
@@ -545,6 +580,48 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun transferOwner(userId: String) {
+        val chat = currentChat.value ?: return
+        viewModelScope.launch {
+            try {
+                val updated = Api.transferOwner(chat.id, userId)
+                currentChat.value = updated
+                refreshChats()
+                message.value = "Комната передана"
+            } catch (e: Exception) {
+                message.value = e.message
+            }
+        }
+    }
+
+    fun kickMember(userId: String) {
+        val chat = currentChat.value ?: return
+        viewModelScope.launch {
+            try {
+                Api.kickMember(chat.id, userId)
+                val updated = Api.messages(chat.id, 0).first
+                if (updated != null) currentChat.value = updated
+                refreshChats()
+            } catch (e: Exception) {
+                message.value = e.message
+            }
+        }
+    }
+
+    fun leaveRoom() {
+        val chat = currentChat.value ?: return
+        viewModelScope.launch {
+            try {
+                val result = Api.leaveRoom(chat.id)
+                closeChat()
+                refreshChats()
+                message.value = if (result.optBoolean("closed")) "Комната закрыта" else "Вы вышли из комнаты"
+            } catch (e: Exception) {
+                message.value = e.message
+            }
+        }
+    }
+
     fun clearMessage() {
         message.value = null
     }
@@ -552,11 +629,12 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
     // ------------------------------------------------------------ обновление
 
     fun checkForUpdate() {
-        val url = BuildConfig.UPDATE_URL
-        if (url.isBlank()) return
+        val repo = BuildConfig.UPDATE_REPO
+        if (repo.isBlank()) return
         viewModelScope.launch {
-            runCatching { Api.fetchUpdate(url) }.onSuccess { latest ->
-                if (latest.versionCode > BuildConfig.VERSION_CODE && latest.apkUrl.isNotBlank()) {
+            runCatching { Api.fetchLatestRelease(repo) }.onSuccess { latest ->
+                val newer = versionNumber(latest.versionName) > versionNumber(BuildConfig.VERSION_NAME)
+                if (newer && latest.apkUrl.isNotBlank()) {
                     updateAvailable.value = latest
                 }
             }
@@ -565,11 +643,6 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun dismissUpdate() {
         updateAvailable.value = null
-    }
-
-    fun setTheme(value: AppTheme) {
-        prefs.theme = if (value == AppTheme.MATERIAL) "material" else "normal"
-        theme.value = value
     }
 
     fun notifyLocal(text: String) {

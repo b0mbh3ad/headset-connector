@@ -46,6 +46,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.headsetconnector.agent.AgentService
 import com.headsetconnector.agent.DeviceInfo
+import com.headsetconnector.data.accentColor
+import com.headsetconnector.ui.Accent
 import com.headsetconnector.ui.Accent2
 import com.headsetconnector.ui.Bg
 import com.headsetconnector.ui.Card
@@ -77,9 +79,9 @@ class MainActivity : ComponentActivity() {
 private data class Tab(val title: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("Чаты", Icons.Rounded.ChatBubble),
-    Tab("Друзья", Icons.Rounded.People),
-    Tab("Профиль", Icons.Rounded.Person),
+    Tab("Chats", Icons.Rounded.ChatBubble),
+    Tab("Friends", Icons.Rounded.People),
+    Tab("Profile", Icons.Rounded.Person),
 )
 
 @Composable
@@ -88,7 +90,7 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
     val currentChat by vm.currentChat.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val update by vm.updateAvailable.collectAsStateWithLifecycle()
-    val theme by vm.theme.collectAsStateWithLifecycle()
+    val accent = session?.accent?.let { hex -> accentColor(hex) } ?: Accent
 
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -110,7 +112,7 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
 
     BackHandler(enabled = currentChat != null) { vm.closeChat() }
 
-    HeadsetTheme(theme) {
+    HeadsetTheme(accent) {
     Box(Modifier.fillMaxSize().background(Bg)) {
         when {
             session == null -> WelcomeScreen(vm)
@@ -143,8 +145,8 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
                             NavigationBarItem(
                                 selected = tab == 3,
                                 onClick = { tab = 3 },
-                                icon = { Icon(Icons.Rounded.VideogameAsset, "Шлем") },
-                                label = { Text("Шлем", fontSize = 10.sp) },
+                                icon = { Icon(Icons.Rounded.VideogameAsset, "Headset") },
+                                label = { Text("Headset", fontSize = 10.sp) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = Accent2,
                                     selectedTextColor = Accent2,
@@ -181,8 +183,8 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
                 onDismissRequest = { vm.dismissUpdate() },
                 containerColor = Card,
                 shape = RoundedCornerShape(22.dp),
-                title = { Text("Доступна версия ${upd.versionName}") },
-                text = { Text(if (installing) "Скачиваю обновление…" else "Установить новую версию приложения?") },
+                title = { Text("Update available: ${upd.versionName}") },
+                text = { Text(if (installing) "Downloading update…" else "Install new version?") },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -194,14 +196,14 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
                                     vm.dismissUpdate()
                                 } catch (e: Exception) {
                                     installing = false
-                                    vm.notifyLocal("Не удалось скачать обновление")
+                                    vm.notifyLocal("Failed to download update")
                                 }
                             }
                         },
                         enabled = !installing,
                     ) {
                         Text(
-                            if (installing) "Скачиваю…" else "Обновить",
+                            if (installing) "Downloading…" else "Update",
                             color = Accent2,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -209,7 +211,7 @@ private fun App(vm: ConnectorViewModel = viewModel()) {
                 },
                 dismissButton = {
                     TextButton(onClick = { vm.dismissUpdate() }, enabled = !installing) {
-                        Text("Позже", color = TextSecondary)
+                        Text("Later", color = TextSecondary)
                     }
                 },
             )

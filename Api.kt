@@ -29,7 +29,7 @@ object Api {
         path: String,
         body: JSONObject? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank()) throw ApiException("Сервер не настроен")
+        if (baseUrl.isBlank()) throw ApiException("Server not configured")
 
         val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
@@ -51,7 +51,7 @@ object Api {
             connection.responseCode
         } catch (e: Exception) {
             connection.disconnect()
-            throw ApiException("Нет связи с сервером. Проверьте адрес и Wi-Fi.")
+            throw ApiException("No connection to server. Check address and Wi-Fi.")
         }
 
         val text = runCatching {
@@ -63,7 +63,7 @@ object Api {
 
         val json = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
         if (code !in 200..299) {
-            throw ApiException(json.optString("error").ifBlank { "Ошибка сервера ($code)" })
+            throw ApiException(json.optString("error").ifBlank { "Server error ($code)" })
         }
         json
     }
@@ -117,36 +117,53 @@ object Api {
 
     suspend fun me(): Me = parseMe(call("GET", "/api/me").getJSONObject("user"))
 
-    suspend fun fetchUpdate(url: String): AppUpdate = withContext(Dispatchers.IO) {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    suspend fun fetchLatestRelease(repo: String): AppUpdate = withContext(Dispatchers.IO) {
+        val connection = (URL("https://api.github.com/repos/$repo/releases/latest").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 12_000
             readTimeout = 20_000
-            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "HeadsetConnector")
         }
         val text = runCatching {
             connection.inputStream.bufferedReader().use { it.readText() }
         }.getOrElse {
             connection.disconnect()
-            throw ApiException("Не удалось проверить обновление")
+            throw ApiException("Failed to check update")
         }
         connection.disconnect()
-        parseAppUpdate(JSONObject(text))
+
+        val json = JSONObject(text)
+        val tag = json.optString("tag_name").removePrefix("v").removePrefix("V").trim()
+        val assets = json.optJSONArray("assets") ?: JSONArray()
+        var apkUrl = ""
+        for (i in 0 until assets.length()) {
+            val asset = assets.getJSONObject(i)
+            if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                apkUrl = asset.optString("browser_download_url")
+                break
+            }
+        }
+        AppUpdate(versionCode = versionNumber(tag), versionName = tag, apkUrl = apkUrl)
     }
 
     suspend fun updateProfile(
         displayName: String? = null,
         bio: String? = null,
+        status: String? = null,
         accent: String? = null,
         headset: String? = null,
     ): Me {
         val body = JSONObject()
         displayName?.let { body.put("displayName", it) }
         bio?.let { body.put("bio", it) }
+        status?.let { body.put("status", it) }
         accent?.let { body.put("accent", it) }
         headset?.let { body.put("headset", it) }
         return parseMe(call("PATCH", "/api/me", body).getJSONObject("user"))
     }
+
+    suspend fun deleteAccount() = call("DELETE", "/api/me")
 
     suspend fun updateDisplayName(name: String): Me = updateProfile(displayName = name)
 
@@ -223,6 +240,15 @@ object Api {
     suspend fun joinPublic(chatId: String): Chat = parseChat(
         call("POST", "/api/chats/$chatId/join").getJSONObject("chat"),
     )
+
+    suspend fun transferOwner(chatId: String, userId: String): Chat = parseChat(
+        call("POST", "/api/chats/$chatId/owner", JSONObject().put("userId", userId)).getJSONObject("chat"),
+    )
+
+    suspend fun kickMember(chatId: String, userId: String) =
+        call("DELETE", "/api/chats/$chatId/members/$userId")
+
+    suspend fun leaveRoom(chatId: String) = call("POST", "/api/chats/$chatId/leave")
 
     suspend fun rooms(): List<Room> {
         val array = call("GET", "/api/rooms").optJSONArray("rooms") ?: JSONArray()

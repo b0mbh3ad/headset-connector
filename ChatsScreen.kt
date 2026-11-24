@@ -79,20 +79,20 @@ fun ChatsScreen(vm: ConnectorViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "Чаты",
+                            "Chats",
                             color = TextPrimary,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.5).sp,
                         )
                         Text(
-                            "Личные диалоги и комнаты",
+                            "Personal chats and rooms",
                             color = TextSecondary,
                             fontSize = 12.sp,
                         )
                     }
                     IconButton(onClick = { vm.refreshChats() }) {
-                        Icon(Icons.Rounded.Refresh, "Обновить", tint = TextSecondary)
+                        Icon(Icons.Rounded.Refresh, "Refresh", tint = TextSecondary)
                     }
                 }
             }
@@ -101,27 +101,27 @@ fun ChatsScreen(vm: ConnectorViewModel) {
                 item {
                     CardBox {
                         Text(
-                            "Пока пусто",
+                            "Nothing yet",
                             color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.height(4.dp))
                         Hint(
-                            "Добавьте друга по юзернейму — и появится личный чат. " +
-                                "Или создайте комнату и отправьте другу код.",
+                            "Add a friend by username — a private chat will appear. " +
+                                "Or create a room and share the code.",
                         )
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GhostButton(
-                                text = "Создать комнату",
+                                text = "Create room",
                                 modifier = Modifier.weight(1f),
                                 icon = Icons.Rounded.Groups,
                                 tint = Accent2,
                                 onClick = { showCreate = true },
                             )
                             GhostButton(
-                                text = "По коду",
+                                text = "By code",
                                 modifier = Modifier.weight(1f),
                                 icon = Icons.Rounded.Key,
                                 onClick = { showJoin = true },
@@ -146,21 +146,21 @@ fun ChatsScreen(vm: ConnectorViewModel) {
                 containerColor = Accent,
                 contentColor = Color.White,
             ) {
-                Icon(Icons.Rounded.Add, "Создать")
+                Icon(Icons.Rounded.Add, "Create")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text("Создать комнату") },
+                    text = { Text("Create voice room") },
                     leadingIcon = { Icon(Icons.Rounded.Groups, null, tint = Accent2) },
                     onClick = { menu = false; showCreate = true },
                 )
                 DropdownMenuItem(
-                    text = { Text("Войти по коду") },
+                    text = { Text("Join by code") },
                     leadingIcon = { Icon(Icons.Rounded.Key, null, tint = Accent2) },
                     onClick = { menu = false; showJoin = true },
                 )
                 DropdownMenuItem(
-                    text = { Text("Публичные комнаты") },
+                    text = { Text("Public voice rooms") },
                     leadingIcon = { Icon(Icons.Rounded.Public, null, tint = Accent2) },
                     onClick = { menu = false; showRooms = true },
                 )
@@ -259,7 +259,7 @@ private fun ChatRow(chat: Chat, onClick: () -> Unit) {
             if (chat.isRoom && !chat.code.isNullOrBlank()) {
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "код ${chat.code}",
+                    "code ${chat.code}",
                     color = Accent2,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
@@ -287,11 +287,11 @@ private fun ChatRow(chat: Chat, onClick: () -> Unit) {
 }
 
 private fun preview(chat: Chat): String {
-    val last = chat.lastMessage ?: return "Нет сообщений"
+    val last = chat.lastMessage ?: return "No messages"
     val body = when {
         last.text.isNotBlank() -> last.text
-        last.audioUrl != null -> "Голосовое · ${formatDuration(last.audioDuration)}"
-        else -> "Сообщение"
+        last.audioUrl != null -> "Voice message · ${formatDuration(last.audioDuration)}"
+        else -> "Message"
     }
     return if (chat.isRoom) "${last.senderName}: $body" else body
 }
@@ -306,14 +306,14 @@ private fun CreateRoomDialog(onDismiss: () -> Unit, onCreate: (String, String, B
         onDismissRequest = onDismiss,
         containerColor = Card,
         shape = RoundedCornerShape(22.dp),
-        title = { Text("Новая комната", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
+        title = { Text("New voice room", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 Field(
                     value = title,
                     onValueChange = { title = it.take(40) },
-                    label = "Название",
-                    placeholder = "Вечерний созвон",
+                    label = "Title",
+                    placeholder = "Evening call",
                 )
                 Spacer(Modifier.height(10.dp))
                 Field(
@@ -322,6 +322,8 @@ private fun CreateRoomDialog(onDismiss: () -> Unit, onCreate: (String, String, B
                     label = "Описание",
                     placeholder = "О чём эта комната",
                 )
+                Spacer(Modifier.height(8.dp))
+                Hint("Внутри комнаты только голосовой чат — текст пишется в личные сообщения.")
                 Spacer(Modifier.height(14.dp))
                 LabeledSwitch(
                     title = "Публичная",
@@ -395,7 +397,7 @@ private fun PublicRoomsDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Публичные комнаты",
+                    "Публичные голосовые комнаты",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),

@@ -86,6 +86,24 @@
   .toast.on { opacity: 1; }
   .empty { color: var(--muted); text-align: center; padding: 20px 0; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  #badgeModal {
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, .55);
+    place-items: center; z-index: 30; padding: 20px;
+  }
+  .badge-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px; width: min(360px, 92vw); display: flex; flex-direction: column; gap: 8px;
+  }
+  .badge-card h3 { margin: 0 0 4px; font-size: 15px; }
+  .badge-pick {
+    background: var(--card-hi); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font-size: 13px; cursor: pointer; text-align: left;
+  }
+  .badge-pick:hover { border-color: var(--accent); }
+  .badge-pick.on { border-color: var(--accent); font-weight: 600; }
+  .badge-pick.none { color: var(--muted); }
+  .badge-actions { display: flex; gap: 8px; }
+  .badge-actions .mini { flex: 1; }
   #app { display: none; }
   @media (max-width: 640px) {
     th:nth-child(3), td:nth-child(3) { display: none; }
@@ -104,7 +122,7 @@
 
   <div id="login" class="card" style="max-width:420px;margin:60px auto">
     <h2 style="margin:0 0 4px;font-size:18px">Вход в панель</h2>
-    <div class="hint" style="margin-bottom:14px">Пароль администратора задаётся на сервере (ADMIN_PASSWORD) или генерируется при первом запуске.</div>
+    <div class="hint" style="margin-bottom:14px">Доступ только по секретному адресу панели.</div>
     <input id="password" type="password" placeholder="Пароль администратора" autocomplete="current-password">
     <div style="height:10px"></div>
     <button id="loginBtn" style="width:100%">Войти</button>
@@ -179,6 +197,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id)
+const ADMIN_PATH = window.HC_ADMIN_PATH || ''
 let token = localStorage.getItem('hc_admin') || ''
 
 function toast(text) {
@@ -190,7 +209,7 @@ function toast(text) {
 }
 
 async function api(path, options = {}) {
-  const headers = { 'X-Admin-Token': token }
+  const headers = { 'X-Admin-Token': token, 'X-Admin-Path': ADMIN_PATH }
   if (options.body) headers['Content-Type'] = 'application/json'
   const res = await fetch(path, { ...options, headers, body: options.body ? JSON.stringify(options.body) : undefined })
   let data = {}
@@ -226,7 +245,7 @@ async function login() {
   try {
     const res = await fetch('/api/admin/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Path': ADMIN_PATH },
       body: JSON.stringify({ password })
     })
     const data = await res.json().catch(() => ({}))
@@ -297,6 +316,8 @@ async function loadUsers(query) {
   try {
     const data = await api('/api/admin/users?q=' + encodeURIComponent(query || ''))
     const users = data.users || []
+    usersCache = {}
+    for (const user of users) usersCache[user.id] = user
     if (!users.length) {
       $('users').innerHTML = '<div class="empty">Никого не нашли</div>'
       return
@@ -304,7 +325,7 @@ async function loadUsers(query) {
     $('users').innerHTML =
       '<table><thead><tr><th>Пользователь</th><th>Юзернейм</th><th>Почта</th><th>Шлем</th><th>Сообщений</th><th>Статус</th><th></th></tr></thead><tbody>' +
       users.map(u => `<tr>
-        <td>${esc(u.displayName)}${u.badge ? ` <span class="pill hset">${esc(u.badge)}</span>` : ''}</td>
+        <td>${esc(u.displayName)}${(u.badgeLabels || []).map(label => ` <span class="pill hset">${esc(label)}</span>`).join('')}</td>
         <td class="muted">@${esc(u.username)}</td>
         <td class="muted">${u.email ? esc(u.email) : '—'}</td>
         <td>${u.headsetLabel ? `<span class="pill hset">${esc(u.headsetLabel)}</span>` : '<span class="muted">—</span>'}</td>
@@ -312,7 +333,7 @@ async function loadUsers(query) {
         <td>${u.banned ? `<span class="pill bad">${u.bannedUntil ? 'бан до ' + fmtDate(u.bannedUntil) : 'заблокирован'}</span>` : '<span class="pill ok">активен</span>'}</td>
         <td class="actions">
           <button class="mini ghost" onclick="resetPassword('${u.id}')">Сбросить пароль</button>
-          <button class="mini ghost" onclick="setBadge('${u.id}')">Значок</button>
+          <button class="mini ghost" onclick="openBadgePicker('${u.id}')">Значок</button>
           ${u.banned
             ? `<button class="mini ghost" onclick="unbanUser('${u.id}')">Разбанить</button>`
             : `<button class="mini danger" onclick="banUser('${u.id}')">Забанить</button>`}
@@ -372,14 +393,55 @@ async function unbanUser(id) {
   } catch (e) { toast(e.message) }
 }
 
-async function setBadge(id) {
-  const badge = prompt('Значок пользователя (пусто — снять)', '')
-  if (badge === null) return
+let usersCache = {}
+let badgeDraft = new Set()
+let badgeUserId = null
+
+const BADGES = [
+  { key: 'developer', label: 'Разработчик' },
+]
+
+function openBadgePicker(id) {
+  badgeUserId = id
+  const user = usersCache[id]
+  badgeDraft = new Set(user && Array.isArray(user.badges) ? user.badges : [])
+  renderBadgePicker()
+  $('badgeModal').style.display = 'grid'
+}
+
+function renderBadgePicker() {
+  $('badgeList').innerHTML = BADGES.map((b) => {
+    const on = badgeDraft.has(b.key)
+    return `<button class="badge-pick${on ? ' on' : ''}" onclick="toggleBadge('${b.key}')">${on ? '✓ ' : ''}${b.label}</button>`
+  }).join('')
+}
+
+function toggleBadge(key) {
+  if (badgeDraft.has(key)) badgeDraft.delete(key)
+  else badgeDraft.add(key)
+  renderBadgePicker()
+}
+
+function clearBadges() {
+  badgeDraft = new Set()
+  renderBadgePicker()
+}
+
+async function saveBadges() {
+  if (!badgeUserId) return
   try {
-    await api('/api/admin/users/' + id + '/badge', { method: 'POST', body: { badge: badge.trim() } })
-    toast(badge.trim() ? 'Значок выдан' : 'Значок снят')
+    await api('/api/admin/users/' + badgeUserId + '/badge', {
+      method: 'POST',
+      body: { badges: [...badgeDraft] },
+    })
+    toast(badgeDraft.size ? 'Значки сохранены' : 'Значки сняты')
+    closeBadgePicker()
     loadUsers($('userQuery').value)
   } catch (e) { toast(e.message) }
+}
+
+function closeBadgePicker() {
+  $('badgeModal').style.display = 'none'
 }
 
 async function resetPassword(id) {
@@ -482,5 +544,18 @@ $('cleanupBtn').addEventListener('click', cleanup)
 
 if (token) showApp()
 </script>
+
+<div id="badgeModal" onclick="if (event.target === this) closeBadgePicker()">
+  <div class="badge-card">
+    <h3>Значки пользователя</h3>
+    <div class="hint">Можно выбрать несколько. Нажми «Сохранить».</div>
+    <div id="badgeList"></div>
+    <div class="badge-actions">
+      <button class="mini ghost" onclick="clearBadges()">Снять все</button>
+      <button class="mini ghost" onclick="saveBadges()">Сохранить</button>
+    </div>
+    <button class="mini ghost" onclick="closeBadgePicker()">Отмена</button>
+  </div>
+</div>
 </body>
 </html>
